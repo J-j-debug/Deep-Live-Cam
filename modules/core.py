@@ -51,6 +51,10 @@ def parse_args() -> None:
     program.add_argument('--execution-provider', help='execution provider', dest='execution_provider', default=['cpu'], choices=suggest_execution_providers(), nargs='+')
     program.add_argument('--execution-threads', help='number of execution threads', dest='execution_threads', type=int, default=suggest_execution_threads())
     program.add_argument('-v', '--version', action='version', version=f'{modules.metadata.name} {modules.metadata.version}')
+    program.add_argument('--ui', help='user interface mode', dest='ui_mode', default='desktop', choices=['desktop', 'web'])
+    program.add_argument('--ui-username', help='username for web ui', dest='ui_username')
+    program.add_argument('--ui-password', help='password for web ui', dest='ui_password')
+    program.add_argument('--ui-port', help='port for web ui', dest='ui_port', type=int, default=7860)
 
     # register deprecated args
     program.add_argument('-f', '--face', help=argparse.SUPPRESS, dest='source_path_deprecated')
@@ -80,6 +84,10 @@ def parse_args() -> None:
     modules.globals.execution_providers = decode_execution_providers(args.execution_provider)
     modules.globals.execution_threads = args.execution_threads
     modules.globals.lang = args.lang
+    modules.globals.ui_mode = args.ui_mode
+    modules.globals.ui_username = args.ui_username
+    modules.globals.ui_password = args.ui_password
+    modules.globals.ui_port = args.ui_port
 
     #for ENHANCER tumbler:
     if 'face_enhancer' in args.frame_processor:
@@ -173,7 +181,10 @@ def pre_check() -> bool:
 def update_status(message: str, scope: str = 'DLC.CORE') -> None:
     print(f'[{scope}] {message}')
     if not modules.globals.headless:
-        ui.update_status(message)
+        if modules.globals.ui_mode == 'web':
+            pass
+        else:
+            ui.update_status(message)
 
 def start() -> None:
     for frame_processor in get_frame_processors_modules(modules.globals.frame_processors):
@@ -252,7 +263,10 @@ def run() -> None:
         if not frame_processor.pre_check():
             return
     limit_resources()
-    if modules.globals.headless:
+    if modules.globals.ui_mode == 'web':
+        import modules.web_ui as web_ui
+        web_ui.init(start, destroy)
+    elif modules.globals.headless:
         start()
     else:
         window = ui.init(start, destroy, modules.globals.lang)
