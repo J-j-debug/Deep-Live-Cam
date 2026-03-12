@@ -69,33 +69,88 @@ def get_face_swapper() -> Any:
 
 def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
     face_swapper = get_face_swapper()
+    if face_swapper is None:
+        return temp_frame
+
+    # Safety check for faces
+    if source_face is None or target_face is None:
+        return temp_frame
+
+    # Store a copy of the original frame for opacity blending
+    opacity = getattr(modules.globals, "opacity", 1.0)
+    opacity = max(0.0, min(1.0, opacity))
+    original_frame = temp_frame if opacity >= 1.0 else temp_frame.copy()
 
     # Apply the face swap
-    swapped_frame = face_swapper.get(
-        temp_frame, target_face, source_face, paste_back=True
-    )
+    try:
+        swapped_frame = face_swapper.get(
+            temp_frame, target_face, source_face, paste_back=True
+        )
+    except Exception as e:
+        print(f"{NAME}: Error during swap: {e}")
+        return original_frame
+
+    if swapped_frame is None:
+        return original_frame
+
+    # Ensure swapped_frame is uint8
+    swapped_frame = np.clip(swapped_frame, 0, 255).astype(np.uint8)
 
     if modules.globals.mouth_mask:
         # Create a mask for the target face
         face_mask = create_face_mask(target_face, temp_frame)
 
         # Create the mouth mask
-        mouth_mask, mouth_cutout, mouth_box, lower_lip_polygon = (
+        mouth_mask_arr, mouth_cutout, mouth_box, lower_lip_polygon = (
             create_lower_mouth_mask(target_face, temp_frame)
         )
 
         # Apply the mouth area
-        swapped_frame = apply_mouth_area(
-            swapped_frame, mouth_cutout, mouth_box, face_mask, lower_lip_polygon
-        )
+        if mouth_cutout is not None and mouth_box != (0, 0, 0, 0):
+            swapped_frame = apply_mouth_area(
+                swapped_frame, mouth_cutout, mouth_box, face_mask, lower_lip_polygon
+            )
 
         if modules.globals.show_mouth_mask_box:
-            mouth_mask_data = (mouth_mask, mouth_cutout, mouth_box, lower_lip_polygon)
+            mouth_mask_data = (mouth_mask_arr, mouth_cutout, mouth_box, lower_lip_polygon)
             swapped_frame = draw_mouth_mask_visualization(
                 swapped_frame, target_face, mouth_mask_data
             )
 
-    return swapped_frame
+    # --- Poisson Blending ---
+    if getattr(modules.globals, "poisson_blend", False):
+        face_mask = create_face_mask(target_face, temp_frame)
+        if face_mask is not None:
+            # Find bounding box of the mask
+            y_indices, x_indices = np.where(face_mask > 0)
+            if len(x_indices) > 0 and len(y_indices) > 0:
+                x_min, x_max = np.min(x_indices), np.max(x_indices)
+                y_min, y_max = np.min(y_indices), np.max(y_indices)
+
+                # Calculate center
+                center = (int((x_min + x_max) / 2), int((y_min + y_max) / 2))
+
+                # Crop src and mask
+                src_crop = swapped_frame[y_min : y_max + 1, x_min : x_max + 1]
+                mask_crop = face_mask[y_min : y_max + 1, x_min : x_max + 1]
+
+                try:
+                    swapped_frame = cv2.seamlessClone(
+                        src_crop,
+                        original_frame,
+                        mask_crop,
+                        center,
+                        cv2.NORMAL_CLONE,
+                    )
+                except Exception as e:
+                    print(f"{NAME}: Poisson blending failed: {e}")
+
+    # Apply opacity blend
+    if opacity >= 1.0:
+        return swapped_frame.astype(np.uint8)
+
+    swapped_frame = cv2.addWeighted(original_frame, 1.0 - opacity, swapped_frame, opacity, 0)
+    return swapped_frame.astype(np.uint8)
 
 
 def process_frame(source_face: Face, temp_frame: Frame) -> Frame:
@@ -177,6 +232,8 @@ def process_frame_v2(temp_frame: Frame, temp_frame_path: str = "") -> Frame:
                     modules.globals.simple_map["target_embeddings"]
                 ):
                     for detected_face in detected_faces:
+                        if not hasattr(detected_face, 'normed_embedding') or detected_face.normed_embedding is None:
+                            continue
                         closest_centroid_index, _ = find_closest_centroid(
                             modules.globals.simple_map["target_embeddings"],
                             detected_face.normed_embedding,
@@ -191,8 +248,15 @@ def process_frame_v2(temp_frame: Frame, temp_frame_path: str = "") -> Frame:
                         )
                 else:
                     detected_faces_centroids = []
+                    valid_faces = []
                     for face in detected_faces:
-                        detected_faces_centroids.append(face.normed_embedding)
+                        if hasattr(face, 'normed_embedding') and face.normed_embedding is not None:
+                            detected_faces_centroids.append(face.normed_embedding)
+                            valid_faces.append(face)
+                    
+                    if not detected_faces_centroids:
+                        return temp_frame
+
                     i = 0
                     for target_embedding in modules.globals.simple_map[
                         "target_embeddings"
@@ -203,7 +267,7 @@ def process_frame_v2(temp_frame: Frame, temp_frame_path: str = "") -> Frame:
 
                         temp_frame = swap_face(
                             modules.globals.simple_map["source_faces"][i],
-                            detected_faces[closest_centroid_index],
+                            valid_faces[closest_centroid_index],
                             temp_frame,
                         )
                         i += 1
@@ -532,70 +596,46 @@ def apply_mouth_area(
 
 
 def create_face_mask(face: Face, frame: Frame) -> np.ndarray:
+    """Creates a feathered mask covering the whole face area based on landmarks."""
     mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+
+    if face is None or not hasattr(face, 'landmark_2d_106') or frame is None:
+        return mask
+
     landmarks = face.landmark_2d_106
-    if landmarks is not None:
-        # Convert landmarks to int32
-        landmarks = landmarks.astype(np.int32)
+    if landmarks is None or not isinstance(landmarks, np.ndarray) or landmarks.shape[0] < 106:
+        return mask
 
-        # Extract facial features
-        right_side_face = landmarks[0:16]
-        left_side_face = landmarks[17:32]
-        right_eye = landmarks[33:42]
-        right_eye_brow = landmarks[43:51]
-        left_eye = landmarks[87:96]
-        left_eye_brow = landmarks[97:105]
+    try:
+        landmarks_int = landmarks.astype(np.int32)
+        face_outline = landmarks_int[0:33]
 
-        # Calculate forehead extension
-        right_eyebrow_top = np.min(right_eye_brow[:, 1])
-        left_eyebrow_top = np.min(left_eye_brow[:, 1])
-        eyebrow_top = min(right_eyebrow_top, left_eyebrow_top)
+        # forehead extension
+        eyebrows = landmarks_int[33:43]
+        if eyebrows.shape[0] > 0:
+            chin = landmarks_int[16]
+            eyebrow_center = np.mean(eyebrows, axis=0)
+            up_vector = eyebrow_center - chin
+            norm = np.linalg.norm(up_vector)
+            if norm > 0:
+                up_vector /= norm
+                # Extend upwards by 1.0 of the chin-to-eyebrow distance
+                forehead_offset = up_vector * (norm * 1.0)
+                forehead_points = eyebrows + forehead_offset
+                top_center = np.mean(forehead_points, axis=0)
+                forehead_points = (forehead_points - top_center) * 1.2 + top_center
+                face_outline = np.concatenate((face_outline, forehead_points.astype(np.int32)), axis=0)
 
-        face_top = np.min([right_side_face[0, 1], left_side_face[-1, 1]])
-        forehead_height = face_top - eyebrow_top
-        extended_forehead_height = int(forehead_height * 5.0)  # Extend by 50%
+        hull = cv2.convexHull(face_outline.astype(np.int32))
+        cv2.fillConvexPoly(mask, hull, 255)
 
-        # Create forehead points
-        forehead_left = right_side_face[0].copy()
-        forehead_right = left_side_face[-1].copy()
-        forehead_left[1] -= extended_forehead_height
-        forehead_right[1] -= extended_forehead_height
+        # Apply Gaussian blur to feather the mask edges
+        blur_k_size = getattr(modules.globals, "face_mask_blur", 31)
+        blur_k_size = max(1, blur_k_size // 2 * 2 + 1)
+        mask = cv2.GaussianBlur(mask, (blur_k_size, blur_k_size), 0)
 
-        # Combine all points to create the face outline
-        face_outline = np.vstack(
-            [
-                [forehead_left],
-                right_side_face,
-                left_side_face[
-                    ::-1
-                ],  # Reverse left side to create a continuous outline
-                [forehead_right],
-            ]
-        )
-
-        # Calculate padding
-        padding = int(
-            np.linalg.norm(right_side_face[0] - left_side_face[-1]) * 0.05
-        )  # 5% of face width
-
-        # Create a slightly larger convex hull for padding
-        hull = cv2.convexHull(face_outline)
-        hull_padded = []
-        for point in hull:
-            x, y = point[0]
-            center = np.mean(face_outline, axis=0)
-            direction = np.array([x, y]) - center
-            direction = direction / np.linalg.norm(direction)
-            padded_point = np.array([x, y]) + direction * padding
-            hull_padded.append(padded_point)
-
-        hull_padded = np.array(hull_padded, dtype=np.int32)
-
-        # Fill the padded convex hull
-        cv2.fillConvexPoly(mask, hull_padded, 255)
-
-        # Smooth the mask edges
-        mask = cv2.GaussianBlur(mask, (5, 5), 3)
+    except Exception as e:
+        print(f"{NAME}: Error creating face mask: {e}")
 
     return mask
 

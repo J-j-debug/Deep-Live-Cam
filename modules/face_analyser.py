@@ -55,8 +55,10 @@ def simplify_maps() -> Any:
     faces = []
     for map in modules.globals.source_target_map:
         if "source" in map and "target" in map:
-            centroids.append(map['target']['face'].normed_embedding)
-            faces.append(map['source']['face'])
+            face = map['target']['face']
+            if hasattr(face, 'normed_embedding') and face.normed_embedding is not None:
+                centroids.append(face.normed_embedding)
+                faces.append(map['source']['face'])
 
     modules.globals.simple_map = {'source_faces': faces, 'target_embeddings': centroids}
     return None
@@ -114,7 +116,8 @@ def get_unique_faces_from_target_video() -> Any:
             many_faces = get_many_faces(temp_frame)
 
             for face in many_faces:
-                face_embeddings.append(face.normed_embedding)
+                if hasattr(face, 'normed_embedding') and face.normed_embedding is not None:
+                    face_embeddings.append(face.normed_embedding)
             
             frame_face_embeddings.append({'frame': i, 'faces': many_faces, 'location': temp_frame_path})
             i += 1
@@ -123,8 +126,11 @@ def get_unique_faces_from_target_video() -> Any:
 
         for frame in frame_face_embeddings:
             for face in frame['faces']:
-                closest_centroid_index, _ = find_closest_centroid(centroids, face.normed_embedding)
-                face['target_centroid'] = closest_centroid_index
+                if hasattr(face, 'normed_embedding') and face.normed_embedding is not None:
+                    closest_centroid_index, _ = find_closest_centroid(centroids, face.normed_embedding)
+                    face['target_centroid'] = closest_centroid_index
+                else:
+                    face['target_centroid'] = -1  # Mark as invalid
 
         for i in range(len(centroids)):
             modules.globals.source_target_map.append({

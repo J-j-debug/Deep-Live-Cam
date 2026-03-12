@@ -108,6 +108,8 @@ def save_switch_states():
         "show_fps": modules.globals.show_fps,
         "mouth_mask": modules.globals.mouth_mask,
         "show_mouth_mask_box": modules.globals.show_mouth_mask_box,
+        "poisson_blend": modules.globals.poisson_blend,
+        "opacity": modules.globals.opacity,
     }
     with open("switch_states.json", "w") as f:
         json.dump(switch_states, f)
@@ -132,6 +134,8 @@ def load_switch_states():
         modules.globals.show_mouth_mask_box = switch_states.get(
             "show_mouth_mask_box", False
         )
+        modules.globals.poisson_blend = switch_states.get("poisson_blend", False)
+        modules.globals.opacity = switch_states.get("opacity", 1.0)
     except FileNotFoundError:
         # If the file doesn't exist, use default values
         pass
@@ -308,6 +312,34 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     show_mouth_mask_box_switch.place(relx=0.6, rely=0.55)
+
+    poisson_blend_var = ctk.BooleanVar(value=modules.globals.poisson_blend)
+    poisson_blend_switch = ctk.CTkSwitch(
+        root,
+        text=_("Poisson Blend"),
+        variable=poisson_blend_var,
+        cursor="hand2",
+        command=lambda: (
+            setattr(modules.globals, "poisson_blend", poisson_blend_var.get()),
+            save_switch_states(),
+        ),
+    )
+    poisson_blend_switch.place(relx=0.1, rely=0.50)
+
+    opacity_label = ctk.CTkLabel(root, text=_("Opacity"))
+    opacity_label.place(relx=0.6, rely=0.48)
+    opacity_slider = ctk.CTkSlider(
+        root,
+        from_=0.0,
+        to=1.0,
+        number_of_steps=100,
+        command=lambda value: (
+            setattr(modules.globals, "opacity", value),
+            save_switch_states(),
+        ),
+    )
+    opacity_slider.set(modules.globals.opacity)
+    opacity_slider.place(relx=0.6, rely=0.52)
 
     start_button = ctk.CTkButton(
         root, text=_("Start"), cursor="hand2", command=lambda: analyze_target(start, root)
