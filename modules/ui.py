@@ -1,4 +1,7 @@
 import os
+import tkinter as tk
+from tkinter import filedialog
+from pathlib import Path
 import webbrowser
 import customtkinter as ctk
 from typing import Callable, Tuple
@@ -488,7 +491,7 @@ def update_popup_source(
 ) -> list:
     global source_label_dict
 
-    source_path = ctk.filedialog.askopenfilename(
+    source_path = filedialog.askopenfilename(
         title=_("select an source image"),
         initialdir=RECENT_DIRECTORY_SOURCE,
         filetypes=[img_ft],
@@ -579,16 +582,27 @@ def update_tumbler(var: str, value: bool) -> None:
         )
 
 
+
+
+
 def select_source_path() -> None:
-    global RECENT_DIRECTORY_SOURCE, img_ft, vid_ft
+    global RECENT_DIRECTORY_SOURCE, img_ft
 
     PREVIEW.withdraw()
-    source_path = ctk.filedialog.askopenfilename(
-        title=_("select an source image"),
-        initialdir=RECENT_DIRECTORY_SOURCE,
-        filetypes=[img_ft],
-    )
-    if is_image(source_path):
+    source_path = ""
+    try:
+        import subprocess
+        initial_dir = RECENT_DIRECTORY_SOURCE if RECENT_DIRECTORY_SOURCE else os.getcwd()
+        filters = " ".join([ext.strip('*.') for ext in img_ft[1]])
+        cmd = ['zenity', '--file-selection', '--title=Sélectionner une image source', f'--filename={initial_dir}/', f'--file-filter=Images | *.{filters.replace(" ", " *.")}']
+        source_path = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode('utf-8').strip()
+    except Exception:
+        source_path = filedialog.askopenfilename(
+            title=_("Sélectionner une image source"),
+            initialdir=RECENT_DIRECTORY_SOURCE,
+            filetypes=[("Images", "*." + " *.".join([ext.strip('*.') for ext in img_ft[1]]))]
+        )
+    if source_path and is_image(source_path):
         modules.globals.source_path = source_path
         RECENT_DIRECTORY_SOURCE = os.path.dirname(modules.globals.source_path)
         image = render_image_preview(modules.globals.source_path, (200, 200))
@@ -626,17 +640,34 @@ def select_target_path() -> None:
     global RECENT_DIRECTORY_TARGET, img_ft, vid_ft
 
     PREVIEW.withdraw()
-    target_path = ctk.filedialog.askopenfilename(
-        title=_("select an target image or video"),
-        initialdir=RECENT_DIRECTORY_TARGET,
-        filetypes=[img_ft, vid_ft],
-    )
-    if is_image(target_path):
+    
+    img_exts = "*." + " *.".join([ext.strip('*.') for ext in img_ft[1]])
+    vid_exts = "*." + " *.".join([ext.strip('*.') for ext in vid_ft[1]])
+    all_exts = f"{img_exts} {vid_exts}"
+
+    target_path = ""
+    try:
+        import subprocess
+        initial_dir = RECENT_DIRECTORY_TARGET if RECENT_DIRECTORY_TARGET else os.getcwd()
+        filters = all_exts.replace("*.", "*. ")
+        cmd = ['zenity', '--file-selection', '--title=Sélectionner une image ou vidéo cible', f'--filename={initial_dir}/', f'--file-filter=Images et Vidéos | {all_exts}', f'--file-filter=Images | {img_exts}', f'--file-filter=Vidéos | {vid_exts}']
+        target_path = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode('utf-8').strip()
+    except Exception:
+        target_path = filedialog.askopenfilename(
+            title=_("Sélectionner une image ou vidéo cible"),
+            initialdir=RECENT_DIRECTORY_TARGET,
+            filetypes=[
+                ("Images et Vidéos", all_exts),
+                ("Images", img_exts),
+                ("Vidéos", vid_exts)
+            ]
+        )
+    if target_path and is_image(target_path):
         modules.globals.target_path = target_path
         RECENT_DIRECTORY_TARGET = os.path.dirname(modules.globals.target_path)
         image = render_image_preview(modules.globals.target_path, (200, 200))
         target_label.configure(image=image)
-    elif is_video(target_path):
+    elif target_path and is_video(target_path):
         modules.globals.target_path = target_path
         RECENT_DIRECTORY_TARGET = os.path.dirname(modules.globals.target_path)
         video_frame = render_video_preview(target_path, (200, 200))
@@ -649,24 +680,44 @@ def select_target_path() -> None:
 def select_output_path(start: Callable[[], None]) -> None:
     global RECENT_DIRECTORY_OUTPUT, img_ft, vid_ft
 
-    if is_image(modules.globals.target_path):
-        output_path = ctk.filedialog.asksaveasfilename(
-            title=_("save image output file"),
-            filetypes=[img_ft],
-            defaultextension=".png",
-            initialfile="output.png",
-            initialdir=RECENT_DIRECTORY_OUTPUT,
-        )
-    elif is_video(modules.globals.target_path):
-        output_path = ctk.filedialog.asksaveasfilename(
-            title=_("save video output file"),
-            filetypes=[vid_ft],
-            defaultextension=".mp4",
-            initialfile="output.mp4",
-            initialdir=RECENT_DIRECTORY_OUTPUT,
-        )
-    else:
-        output_path = None
+    try:
+        import subprocess
+        initial_dir = RECENT_DIRECTORY_OUTPUT if RECENT_DIRECTORY_OUTPUT else os.getcwd()
+        ext = ".png" if is_image(modules.globals.target_path) else ".mp4"
+        initial_file = os.path.join(initial_dir, f"output{ext}")
+        
+        cmd = [
+            'zenity', '--file-selection', '--save', '--confirm-overwrite',
+            '--title=Enregistrer le fichier de sortie',
+            f'--filename={initial_file}'
+        ]
+        output_path = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode('utf-8').strip()
+        if not output_path:
+            output_path = None
+        elif not output_path.lower().endswith(ext):
+            # Zenity doesn't add extension automatically — force it
+            output_path = output_path + ext
+    except Exception:
+        # Fallback to Motif if zenity is unavailable
+        if is_image(modules.globals.target_path):
+            output_path = filedialog.asksaveasfilename(
+                title=_("save image output file"),
+                filetypes=[img_ft],
+                defaultextension=".png",
+                initialfile="output.png",
+                initialdir=RECENT_DIRECTORY_OUTPUT,
+            )
+        elif is_video(modules.globals.target_path):
+            output_path = filedialog.asksaveasfilename(
+                title=_("save video output file"),
+                filetypes=[vid_ft],
+                defaultextension=".mp4",
+                initialfile="output.mp4",
+                initialdir=RECENT_DIRECTORY_OUTPUT,
+            )
+        else:
+            output_path = None
+
     if output_path:
         modules.globals.output_path = output_path
         RECENT_DIRECTORY_OUTPUT = os.path.dirname(modules.globals.output_path)
@@ -1107,7 +1158,7 @@ def update_webcam_source(
 ) -> list:
     global source_label_dict_live
 
-    source_path = ctk.filedialog.askopenfilename(
+    source_path = filedialog.askopenfilename(
         title=_("select an source image"),
         initialdir=RECENT_DIRECTORY_SOURCE,
         filetypes=[img_ft],
@@ -1159,7 +1210,7 @@ def update_webcam_target(
 ) -> list:
     global target_label_dict_live
 
-    target_path = ctk.filedialog.askopenfilename(
+    target_path = filedialog.askopenfilename(
         title=_("select an target image"),
         initialdir=RECENT_DIRECTORY_SOURCE,
         filetypes=[img_ft],

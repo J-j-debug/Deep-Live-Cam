@@ -48,29 +48,47 @@ def pre_start() -> bool:
     return True
 
 
+def _create_face_enhancer(device: str = None) -> Any:
+    """Create a GFPGANer instance. Pass device='cpu' to force CPU mode."""
+    model_path = os.path.join(models_dir, "GFPGANv1.4.pth")
+    match platform.system():
+        case "Darwin":  # Mac OS
+            if torch.backends.mps.is_available():
+                mps_device = torch.device("mps")
+                return gfpgan.GFPGANer(model_path=model_path, upscale=1, device=mps_device)  # type: ignore[attr-defined]
+            else:
+                return gfpgan.GFPGANer(model_path=model_path, upscale=1)  # type: ignore[attr-defined]
+        case _:  # Linux / Windows
+            if device:
+                return gfpgan.GFPGANer(model_path=model_path, upscale=1, device=device)  # type: ignore[attr-defined]
+            return gfpgan.GFPGANer(model_path=model_path, upscale=1)  # type: ignore[attr-defined]
+
+
 def get_face_enhancer() -> Any:
     global FACE_ENHANCER
 
     with THREAD_LOCK:
         if FACE_ENHANCER is None:
-            model_path = os.path.join(models_dir, "GFPGANv1.4.pth")
-            
-            match platform.system():
-                case "Darwin":  # Mac OS
-                    if torch.backends.mps.is_available():
-                        mps_device = torch.device("mps")
-                        FACE_ENHANCER = gfpgan.GFPGANer(model_path=model_path, upscale=1, device=mps_device)  # type: ignore[attr-defined]
-                    else:
-                        FACE_ENHANCER = gfpgan.GFPGANer(model_path=model_path, upscale=1)  # type: ignore[attr-defined]
-                case _:  # Other OS
-                    FACE_ENHANCER = gfpgan.GFPGANer(model_path=model_path, upscale=1)  # type: ignore[attr-defined]
+            FACE_ENHANCER = _create_face_enhancer()
 
     return FACE_ENHANCER
 
 
 def enhance_face(temp_frame: Frame) -> Frame:
+    global FACE_ENHANCER
+
     with THREAD_SEMAPHORE:
-        _, _, temp_frame = get_face_enhancer().enhance(temp_frame, paste_back=True)
+        try:
+            _, _, temp_frame = get_face_enhancer().enhance(temp_frame, paste_back=True)
+        except (RuntimeError, Exception) as e:
+            if 'CUDA' in str(e) or 'cuda' in str(e) or 'kernel image' in str(e):
+                # GPU failed (e.g. unsupported architecture) — retry on CPU
+                update_status('GPU unavailable for face enhancement, falling back to CPU.', NAME)
+                with THREAD_LOCK:
+                    FACE_ENHANCER = _create_face_enhancer(device='cpu')
+                _, _, temp_frame = FACE_ENHANCER.enhance(temp_frame, paste_back=True)
+            else:
+                raise
     return temp_frame
 
 
