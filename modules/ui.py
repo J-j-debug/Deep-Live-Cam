@@ -110,6 +110,8 @@ def save_switch_states():
         "show_mouth_mask_box": modules.globals.show_mouth_mask_box,
         "poisson_blend": modules.globals.poisson_blend,
         "opacity": modules.globals.opacity,
+        "enable_web_interface": modules.globals.enable_web_interface,
+        "web_port": modules.globals.web_port,
     }
     with open("switch_states.json", "w") as f:
         json.dump(switch_states, f)
@@ -136,6 +138,8 @@ def load_switch_states():
         )
         modules.globals.poisson_blend = switch_states.get("poisson_blend", False)
         modules.globals.opacity = switch_states.get("opacity", 1.0)
+        modules.globals.enable_web_interface = switch_states.get("enable_web_interface", False)
+        modules.globals.web_port = switch_states.get("web_port", 9000)
     except FileNotFoundError:
         # If the file doesn't exist, use default values
         pass
@@ -414,6 +418,16 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         "<Button>", lambda event: webbrowser.open("https://deeplivecam.net")
     )
 
+    web_button = ctk.CTkButton(
+        root,
+        text="🌐 Web",
+        width=60,
+        height=25,
+        cursor="hand2",
+        command=lambda: create_web_settings_popup(root),
+    )
+    web_button.place(relx=0.88, rely=0.94, anchor="ne")
+
     return root
 
 def close_mapper_window():
@@ -424,6 +438,92 @@ def close_mapper_window():
     if POPUP_LIVE and POPUP_LIVE.winfo_exists():
         POPUP_LIVE.destroy()
         POPUP_LIVE = None
+
+WEB_SERVER_PROCESS = None
+
+def create_web_settings_popup(root: ctk.CTk):
+    global POPUP
+    if POPUP and POPUP.winfo_exists():
+        update_status("Please complete pop-up or close it.")
+        return
+
+    POPUP = ctk.CTkToplevel(root)
+    POPUP.title(_("Web Interface Settings"))
+    POPUP.geometry("300x250")
+    POPUP.resizable(False, False)
+    POPUP.attributes("-topmost", True)
+
+    label = ctk.CTkLabel(POPUP, text=_("Web Server Configuration"), font=("Arial", 16, "bold"))
+    label.pack(pady=10)
+
+    web_enable_var = ctk.BooleanVar(value=modules.globals.enable_web_interface)
+    web_enable_switch = ctk.CTkSwitch(
+        POPUP,
+        text=_("Enable Web App"),
+        variable=web_enable_var,
+        command=lambda: toggle_web_server(web_enable_var.get())
+    )
+    web_enable_switch.pack(pady=10)
+
+    port_label = ctk.CTkLabel(POPUP, text=_("Web Port:"))
+    port_label.pack()
+
+    port_entry = ctk.CTkEntry(POPUP, placeholder_text="9000")
+    port_entry.insert(0, str(modules.globals.web_port))
+    port_entry.pack(pady=5)
+
+    def save_port():
+        try:
+            val = int(port_entry.get())
+            modules.globals.web_port = val
+            save_switch_states()
+            update_status(f"Web port set to {val}", "DLC.WEB")
+        except ValueError:
+            update_status("Invalid port number", "DLC.WEB")
+
+    save_button = ctk.CTkButton(POPUP, text=_("Save Port"), command=save_port)
+    save_button.pack(pady=10)
+
+    status_info = ctk.CTkLabel(POPUP, text="Sandbox Mode: Enabled", font=("Arial", 10, "italic"))
+    status_info.pack(side="bottom", pady=5)
+
+def toggle_web_server(enabled: bool):
+    global WEB_SERVER_PROCESS
+    modules.globals.enable_web_interface = enabled
+    save_switch_states()
+    
+    if enabled:
+        # Start server logic
+        start_web_server()
+    else:
+        # Stop server logic
+        stop_web_server()
+
+def start_web_server():
+    global WEB_SERVER_PROCESS
+    if WEB_SERVER_PROCESS is None:
+        import subprocess
+        import sys
+        
+        # Determine the python executable (inside venv if applicable)
+        python_exe = sys.executable
+        
+        try:
+            # We will create web_app.py next
+            WEB_SERVER_PROCESS = subprocess.Popen(
+                [python_exe, "web_app.py", "--port", str(modules.globals.web_port)],
+                cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            )
+            update_status(f"Web server started on port {modules.globals.web_port}", "DLC.WEB")
+        except Exception as e:
+            update_status(f"Failed to start web server: {str(e)}", "DLC.WEB")
+
+def stop_web_server():
+    global WEB_SERVER_PROCESS
+    if WEB_SERVER_PROCESS:
+        WEB_SERVER_PROCESS.terminate()
+        WEB_SERVER_PROCESS = None
+        update_status("Web server stopped", "DLC.WEB")
 
 
 def analyze_target(start: Callable[[], None], root: ctk.CTk):

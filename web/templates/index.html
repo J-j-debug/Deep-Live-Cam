@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep-Live-Cam Remote</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="glass-container">
+        <header>
+            <h1>Deep-Live-Cam <span class="badge">Remote</span></h1>
+            <p class="subtitle">Premium AI Face Swapping Powered by Blackwell</p>
+        </header>
+
+        <main>
+            <div class="drop-zones">
+                <div class="drop-card" id="source-drop">
+                    <div class="icon">👤</div>
+                    <h3>Source Face</h3>
+                    <p>Click or drag to upload</p>
+                    <input type="file" id="source-input" hidden accept="image/*">
+                    <div class="preview" id="source-preview"></div>
+                </div>
+
+                <div class="drop-card" id="target-drop">
+                    <div class="icon">🎬</div>
+                    <h3>Target Image/Video</h3>
+                    <p>Click or drag to upload</p>
+                    <input type="file" id="target-input" hidden accept="image/*,video/*">
+                    <div class="preview" id="target-preview"></div>
+                </div>
+            </div>
+
+            <div class="controls glass">
+                <div class="control-group">
+                    <label>Face Enhancer</label>
+                    <label class="switch">
+                        <input type="checkbox" id="face-enhancer">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="control-group">
+                    <label>Poisson Blend</label>
+                    <label class="switch">
+                        <input type="checkbox" id="poisson-blend">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="control-group full">
+                    <label>Opacity: <span id="opacity-val">1.0</span></label>
+                    <input type="range" id="opacity" min="0" max="1" step="0.1" value="1">
+                </div>
+            </div>
+
+            <button id="start-btn" class="primary-btn">Start Processing</button>
+
+            <div class="progress-container" id="progress-box" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <p id="status-text">Uploading...</p>
+            </div>
+
+            <div id="result-container" style="display: none;">
+                <h3 style="margin-top: 20px;">Result</h3>
+                <div id="final-media"></div>
+                <a id="download-btn" class="secondary-btn" download>Download Result</a>
+            </div>
+        </main>
+
+        <footer>
+            <p>Sandboxed Environment • GPU Accelerated</p>
+        </footer>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>
