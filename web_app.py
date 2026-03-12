@@ -36,7 +36,15 @@ for d in [UPLOADS_DIR, OUTPUTS_DIR]:
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# active_websockets: Dict[str, WebSocket] = {}
+# store main event loop for background task communication
+main_loop = None
+
+@app.on_event("startup")
+async def startup_event():
+    global main_loop
+    main_loop = asyncio.get_event_loop()
+
+# WebSocket pool
 websocket_pool = []
 
 class ProcessOptions(BaseModel):
@@ -46,19 +54,32 @@ class ProcessOptions(BaseModel):
     enhancer: bool
     poisson: bool
     opacity: float
-
-# store main event loop for background task communication
-main_loop = None
-
-@app.on_event("startup")
-async def startup_event():
-    global main_loop
-    main_loop = asyncio.get_event_loop()
+    many_faces: bool = False
+    mouth_mask: bool = False
+    keep_fps: bool = True
+    keep_audio: bool = True
+    color_correction: bool = False
 
 @app.get("/", response_class=HTMLResponse)
 async def read_item():
-    with open(os.path.join(TEMPLATES_DIR, "index.html"), "r") as f:
-        return f.read()
+    index_path = os.path.join(TEMPLATES_DIR, "index.html")
+    if os.path.exists(index_path):
+        with open(index_path, "r") as f:
+            return f.read()
+    return "Index not found"
+
+@app.get("/config")
+async def get_config():
+    return {
+        "keep_fps": modules.globals.keep_fps,
+        "keep_audio": modules.globals.keep_audio,
+        "many_faces": modules.globals.many_faces,
+        "color_correction": modules.globals.color_correction,
+        "poisson_blend": modules.globals.poisson_blend,
+        "opacity": modules.globals.opacity,
+        "face_enhancer": modules.globals.fp_ui.get("face_enhancer", False),
+        "mouth_mask": modules.globals.mouth_mask
+    }
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -118,6 +139,11 @@ def run_processing_task(options: ProcessOptions):
     
     modules.globals.poisson_blend = options.poisson
     modules.globals.opacity = options.opacity
+    modules.globals.many_faces = options.many_faces
+    modules.globals.mouth_mask = options.mouth_mask
+    modules.globals.keep_fps = options.keep_fps
+    modules.globals.keep_audio = options.keep_audio
+    modules.globals.color_correction = options.color_correction
     
     # Run Core
     try:
@@ -128,6 +154,7 @@ def run_processing_task(options: ProcessOptions):
             asyncio.run_coroutine_threadsafe(
                 notify_clients({
                     "type": "complete", 
+                    "status": "Success",
                     "url": f"/download/{output_filename}"
                 }),
                 main_loop
@@ -162,4 +189,5 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=9000)
     args = parser.parse_args()
     
+    print(f"Starting Web Server on port {args.port}...")
     uvicorn.run(app, host="0.0.0.0", port=args.port)

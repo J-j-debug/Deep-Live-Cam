@@ -14,6 +14,28 @@ let socket = null;
 // UI Helpers
 opacitySlider.oninput = () => opacityVal.innerText = opacitySlider.value;
 
+// Fetch Initial Config
+async function initConfig() {
+    try {
+        const res = await fetch('/config');
+        const config = await res.json();
+        
+        document.getElementById('keep-fps').checked = config.keep_fps;
+        document.getElementById('keep-audio').checked = config.keep_audio;
+        document.getElementById('many-faces').checked = config.many_faces;
+        document.getElementById('color-correction').checked = config.color_correction;
+        document.getElementById('poisson-blend').checked = config.poisson_blend;
+        document.getElementById('face-enhancer').checked = config.face_enhancer;
+        document.getElementById('mouth_mask') ? document.getElementById('mouth-mask').checked = config.mouth_mask : null;
+        opacitySlider.value = config.opacity;
+        opacityVal.innerText = config.opacity;
+    } catch (err) {
+        console.error("Failed to load config:", err);
+    }
+}
+
+initConfig();
+
 function setupDropZone(zone, input, type) {
     zone.onclick = () => input.click();
     zone.ondragover = (e) => { e.preventDefault(); zone.style.borderColor = '#2ecc71'; };
@@ -77,6 +99,7 @@ startBtn.onclick = async () => {
 
     startBtn.disabled = true;
     document.getElementById('progress-box').style.display = 'block';
+    document.getElementById('result-container').style.display = 'none';
     
     try {
         // Upload Source
@@ -101,7 +124,12 @@ startBtn.onclick = async () => {
             target: targetName,
             enhancer: document.getElementById('face-enhancer').checked,
             poisson: document.getElementById('poisson-blend').checked,
-            opacity: parseFloat(opacitySlider.value)
+            opacity: parseFloat(opacitySlider.value),
+            many_faces: document.getElementById('many-faces').checked,
+            mouth_mask: document.getElementById('mouth-mask').checked,
+            keep_fps: document.getElementById('keep-fps').checked,
+            keep_audio: document.getElementById('keep-audio').checked,
+            color_correction: document.getElementById('color-correction').checked
         };
 
         await fetch('/process', {
@@ -113,6 +141,7 @@ startBtn.onclick = async () => {
     } catch (err) {
         alert("An error occurred: " + err.message);
         startBtn.disabled = false;
+        document.getElementById('progress-box').style.display = 'none';
     }
 };
 
@@ -122,7 +151,7 @@ function showResult(url) {
     const finalMedia = document.getElementById('final-media');
     finalMedia.innerHTML = '';
     
-    if (url.endsWith('.mp4')) {
+    if (url.endsWith('.mp4') || url.endsWith('.mkv')) {
         const video = document.createElement('video');
         video.src = url;
         video.controls = true;
