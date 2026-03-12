@@ -129,7 +129,18 @@ def suggest_max_memory() -> int:
 
 
 def suggest_execution_providers() -> List[str]:
-    return encode_execution_providers(onnxruntime.get_available_providers())
+    available_providers = onnxruntime.get_available_providers()
+    # Prioritize CUDA and filter out known broken providers like TensorRT on this system
+    priority_order = ['CUDAExecutionProvider', 'CoreMLExecutionProvider', 'ROCMExecutionProvider', 'CPUExecutionProvider']
+    
+    # Filter and sort based on priority
+    suggested = [p for p in priority_order if p in available_providers]
+    # Add any other providers that might be there but and not in our priority list
+    for p in available_providers:
+        if p not in suggested and p != 'TensorrtExecutionProvider':
+            suggested.append(p)
+            
+    return encode_execution_providers(suggested)
 
 
 def suggest_execution_threads() -> int:
